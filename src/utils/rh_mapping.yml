@@ -1,0 +1,77 @@
+# -----------------------------------------------------------------------
+# Configuration du mapping pour l'ingestion des fichiers RH
+# Utilisé par : src/etl/load/mod60_load_rh_tables.py
+# -----------------------------------------------------------------------
+
+# Mapping des colonnes du fichier Excel vers les noms canoniques internes.
+# Format : nom_interne: [liste des alias possibles dans le fichier Excel]
+rename_map:
+  id_salarie_brut:
+    - "ID salarié"
+    - "id salarié"
+    - "id_salarié"
+    - "id_salarie"
+    - "ID salarié brut"
+    - "id salarié brut"
+    - "id_salarie_brut"
+  
+  nom:
+    - "nom"
+  
+  prenom:
+    - "prenom"
+    - "prénom"
+  
+  bu:
+    - "bu"
+  
+  type_contrat:
+    - "type_contrat"
+    - "type contrat"
+    - "type_de_contrat"
+    - "type de contrat"
+  
+  date_naissance:
+    - "date_naissance"
+    - "date de naissance"
+  
+  date_embauche:
+    - "date_embauche"
+    - "date embauche"
+    - "date_d_embauche"
+    - "date d'embauche"
+    - "date dembauche"
+  
+  adresse_dom:
+    - "adresse_dom"
+    - "adresse_domicile"
+    - "adresse domicile"
+    - "adresse du domicile"
+  
+  mod_depl_decl:
+    - "mod_depl_decl"
+    - "moyen_de_deplacement"
+    - "moyen de déplacement"
+
+# Colonnes devant être converties en format Date
+date_cols:
+  - "date_naissance"
+  - "date_embauche"
+
+# Colonnes devant être nettoyées en tant que chaînes de caractères (strip, fillna)
+str_cols:
+  - "id_salarie_brut"
+  - "nom"
+  - "prenom"
+  - "bu"
+  - "type_contrat"
+  - "adresse_dom"
+  - "mod_depl_decl"
+
+# Colonnes spécifiques pour la table metier.salarie
+metier_salarie_cols:
+  - "cle_salarie"
+  - "nom"
+  - "prenom"
+  - "bu"
+  - "mod_depl_decl"

@@ -1,0 +1,36 @@
+# .gitignore - Projet P12 Gérer un projet d'infrastructure
+# D:\projets\p12_gerer_projet_infra
+
+# Dossiers et fichiers spécifiques aux IDE/éditeurs
+.vscode/
+vscode/
+.kestra/
+.kestra-temp/
+
+# Python
+__pycache__/
+*.pyc
+.venv/
+venv/
+.venv_kestra/
+.env
+
+# Fichiers système (Windows/Mac)
+Thumbs.db
+.DS_Store
+
+# Données
+data/processed/*
+data/raw/*
+
+# Conservation des fichiers Excel de test
+!data/raw/*.xlsx
+# Ignorer les fichiers temporaires d'Excel ouverts (~$Test.xlsx)
+~$*.xlsx
+
+# Conserver l'arborescence des dossiers même vides
+!*/.gitkeep
+
+# Autres répertoires
+temp/*
+livrables/*

@@ -1,0 +1,161 @@
+checks for metier.vw_bi_activite:
+- row_count > 0:
+    name: 'Volumétrie : au moins 1 ligne'
+- values in (cle_salarie) must exist in metier.vw_bi_salarie (cle_salarie):
+    name: 'Référentiel : cle_salarie présent dans metier.vw_bi_salarie(cle_salarie)'
+- failed rows:
+    name: Cohérence type activité inconnu
+    fail query: "SELECT *\nFROM metier.vw_bi_activite\nWHERE NOT (\n  (type_activite_inconnu = true  AND type_activite_normalise\
+      \ = 'INCONNU')\n  OR\n  (type_activite_inconnu = false AND type_activite_normalise <> 'INCONNU')\n);\n"
+- failed rows:
+    name: Cohérence catégorie activité inconnue
+    fail query: "SELECT *\nFROM metier.vw_bi_activite\nWHERE NOT (\n  (categorie_activite_inconnu = true  AND categorie_activite_normalise\
+      \ = 'INCONNU')\n  OR\n  (categorie_activite_inconnu = false AND categorie_activite_normalise <> 'INCONNU')\n);\n"
+- failed rows:
+    name: Valeurs négatives interdites hors exclusions
+    fail query: "SELECT *\nFROM metier.vw_bi_activite\nWHERE NOT (\n  est_exclue_structurelle = true\n  OR (\n    duree_sec\
+      \ >= 0\n    AND (distance_m IS NULL OR distance_m >= 0)\n  )\n);\n"
+- missing_count(cle_salarie) = 0:
+    name: 'Complétude : aucun NULL sur cle_salarie'
+- missing_count(date_debut) = 0:
+    name: 'Complétude : aucun NULL sur date_debut'
+- missing_count(date_activite) = 0:
+    name: 'Complétude : aucun NULL sur date_activite'
+- missing_count(duree_sec) = 0:
+    name: 'Complétude : aucun NULL sur duree_sec'
+- missing_count(type_activite_normalise) = 0:
+    name: 'Complétude : aucun NULL sur type_activite_normalise'
+- missing_count(type_activite_inconnu) = 0:
+    name: 'Complétude : aucun NULL sur type_activite_inconnu'
+- missing_count(categorie_activite_normalise) = 0:
+    name: 'Complétude : aucun NULL sur categorie_activite_normalise'
+- missing_count(categorie_activite_inconnu) = 0:
+    name: 'Complétude : aucun NULL sur categorie_activite_inconnu'
+- missing_count(source_donnee) = 0:
+    name: 'Complétude : aucun NULL sur source_donnee'
+- missing_count(cle_dedup_activite) = 0:
+    name: 'Complétude : aucun NULL sur cle_dedup_activite'
+- duplicate_count(cle_dedup_activite) = 0:
+    name: 'Unicité : aucun doublon sur cle_dedup_activite'
+checks for metier.vw_bi_salarie:
+- row_count > 0:
+    name: 'Volumétrie : au moins 1 ligne'
+- failed rows:
+    name: Cohérence mode déplacement inconnu
+    fail query: "SELECT *\nFROM metier.vw_bi_salarie\nWHERE NOT (\n  (mod_depl_decl_inconnu = true  AND mod_depl_decl_normalise\
+      \ = 'INCONNU')\n  OR\n  (mod_depl_decl_inconnu = false AND mod_depl_decl_normalise <> 'INCONNU')\n);\n"
+- duplicate_count(cle_salarie) = 0:
+    name: 'Unicité : aucun doublon sur cle_salarie'
+- missing_count(mod_depl_decl_normalise) = 0:
+    name: 'Complétude : aucun NULL sur mod_depl_decl_normalise'
+- missing_count(mod_depl_decl_inconnu) = 0:
+    name: 'Complétude : aucun NULL sur mod_depl_decl_inconnu'
+checks for metier.vw_bi_ctrl_trajet:
+- row_count same as metier.vw_bi_salarie:
+    name: Contrôle qualité (Soda)
+- values in (cle_salarie) must exist in metier.vw_bi_salarie (cle_salarie):
+    name: 'Référentiel : cle_salarie présent dans metier.vw_bi_salarie(cle_salarie)'
+- failed rows:
+    name: Cohérence mode trajet inconnu
+    fail query: "SELECT *\nFROM metier.vw_bi_ctrl_trajet\nWHERE NOT (\n  (mode_trajet_inconnu = true  AND mode_trajet_normalise\
+      \ = 'INCONNU')\n  OR\n  (mode_trajet_inconnu = false AND mode_trajet_normalise <> 'INCONNU')\n);\n"
+- failed rows:
+    name: Distance/Durée manquantes ou négatives hors exclusions
+    fail query: "SELECT *\nFROM metier.vw_bi_ctrl_trajet\nWHERE NOT (\n  est_exclue_structurelle = true\n  OR (\n    duree_min\
+      \ IS NOT NULL AND duree_min >= 0\n    AND distance_km IS NOT NULL AND distance_km >= 0\n  )\n);\n"
+- duplicate_count(cle_salarie) = 0:
+    name: 'Unicité : aucun doublon sur cle_salarie'
+- missing_count(mode_trajet_normalise) = 0:
+    name: 'Complétude : aucun NULL sur mode_trajet_normalise'
+- missing_count(mode_trajet_inconnu) = 0:
+    name: 'Complétude : aucun NULL sur mode_trajet_inconnu'
+- missing_count(est_incoherent) = 0:
+    name: 'Complétude : aucun NULL sur est_incoherent'
+- missing_count(date_ctrl) = 0:
+    name: 'Complétude : aucun NULL sur date_ctrl'
+checks for metier.vw_bi_param_effectif:
+- row_count > 0:
+    name: 'Volumétrie : au moins 1 ligne'
+- failed rows:
+    name: Paramètres requis présents
+    fail query: "WITH required(code_param) AS (\n  VALUES\n    ('adresse_entreprise'),\n    ('jours_bien_etre'),\n    ('min_activites_bien_etre'),\n\
+      \    ('seuil_km_marche_course'),\n    ('seuil_km_velo_autres'),\n    ('taux_prime')\n)\nSELECT r.code_param AS param_manquant\n\
+      FROM required r\nLEFT JOIN metier.vw_bi_param_effectif p\n  ON p.code_param = r.code_param\nWHERE p.code_param IS NULL;\n"
+- duplicate_count(code_param) = 0:
+    name: 'Unicité : aucun doublon sur code_param'
+- missing_count(code_param) = 0:
+    name: 'Complétude : aucun NULL sur code_param'
+- missing_count(valeur_param) = 0:
+    name: 'Complétude : aucun NULL sur valeur_param'
+- missing_count(date_effet) = 0:
+    name: 'Complétude : aucun NULL sur date_effet'
+checks for metier.vue_elig_prime:
+- row_count same as metier.vw_bi_salarie:
+    name: Contrôle qualité (Soda)
+- failed rows:
+    name: Motif inéligibilité cohérent avec le flag
+    fail query: "SELECT *\nFROM metier.vue_elig_prime\nWHERE NOT (\n  (est_eligible_prime = true  AND (motif_ineligibilite\
+      \ IS NULL OR motif_ineligibilite = ''))\n  OR\n  (est_eligible_prime = false AND (motif_ineligibilite IS NOT NULL AND\
+      \ motif_ineligibilite <> ''))\n);\n"
+- duplicate_count(cle_salarie) = 0:
+    name: 'Unicité : aucun doublon sur cle_salarie'
+- missing_count(est_eligible_prime) = 0:
+    name: 'Complétude : aucun NULL sur est_eligible_prime'
+checks for metier.vue_elig_bien_etre:
+- row_count same as metier.vw_bi_salarie:
+    name: Contrôle qualité (Soda)
+- failed rows:
+    name: Période cohérente
+    fail query: "SELECT *\nFROM metier.vue_elig_bien_etre\nWHERE periode_debut IS NULL\n   OR periode_fin IS NULL\n   OR periode_debut\
+      \ > periode_fin;\n"
+- failed rows:
+    name: Attribution jours cohérente
+    fail query: "SELECT *\nFROM metier.vue_elig_bien_etre\nWHERE NOT (\n  (est_eligible_bien_etre = true  AND jours_bien_etre_attribues\
+      \ IS NOT NULL)\n  OR\n  (est_eligible_bien_etre = false AND (jours_bien_etre_attribues IS NULL OR jours_bien_etre_attribues\
+      \ = 0))\n);\n"
+- duplicate_count(cle_salarie) = 0:
+    name: 'Unicité : aucun doublon sur cle_salarie'
+- missing_count(periode_debut) = 0:
+    name: 'Complétude : aucun NULL sur periode_debut'
+- missing_count(periode_fin) = 0:
+    name: 'Complétude : aucun NULL sur periode_fin'
+- missing_count(nb_activites_periode) = 0:
+    name: 'Complétude : aucun NULL sur nb_activites_periode'
+- missing_count(min_activites_bien_etre) = 0:
+    name: 'Complétude : aucun NULL sur min_activites_bien_etre'
+- missing_count(jours_bien_etre) = 0:
+    name: 'Complétude : aucun NULL sur jours_bien_etre'
+- missing_count(est_eligible_bien_etre) = 0:
+    name: 'Complétude : aucun NULL sur est_eligible_bien_etre'
+- missing_count(jours_bien_etre_attribues) = 0:
+    name: 'Complétude : aucun NULL sur jours_bien_etre_attribues'
+checks for metier.vue_kpi_cout_prime:
+- row_count = 1:
+    name: 'Volumétrie : exactement 1 ligne (vue agrégée)'
+- missing_count(nb_salaries_eligibles_prime) = 0:
+    name: 'Complétude : aucun NULL sur nb_salaries_eligibles_prime'
+- missing_count(cout_annuel_total_prime) = 0:
+    name: 'Complétude : aucun NULL sur cout_annuel_total_prime'
+checks for metier.vue_kpi_jours_supplementaires:
+- row_count = 1:
+    name: 'Volumétrie : exactement 1 ligne (vue agrégée)'
+- missing_count(nb_salaries_eligibles_bien_etre) = 0:
+    name: 'Complétude : aucun NULL sur nb_salaries_eligibles_bien_etre'
+- missing_count(nb_jours_supplementaires) = 0:
+    name: 'Complétude : aucun NULL sur nb_jours_supplementaires'
+- missing_count(periode_debut) = 0:
+    name: 'Complétude : aucun NULL sur periode_debut'
+- missing_count(periode_fin) = 0:
+    name: 'Complétude : aucun NULL sur periode_fin'
+checks for metier.vue_kpi_pratique_sportive:
+- row_count > 0:
+    name: 'Volumétrie : au moins 1 ligne'
+- missing_count(type_activite_normalise) = 0:
+    name: 'Complétude : aucun NULL sur type_activite_normalise'
+- missing_count(nb_activites) = 0:
+    name: 'Complétude : aucun NULL sur nb_activites'
+checks for metier.vue_kpi_incoherences:
+- row_count = 1:
+    name: 'Volumétrie : exactement 1 ligne (vue agrégée)'
+- missing_count(nb_incoherences_detectees) = 0:
+    name: 'Complétude : aucun NULL sur nb_incoherences_detectees'

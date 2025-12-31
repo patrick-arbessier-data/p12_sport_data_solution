@@ -1,0 +1,70 @@
+# -----------------------------------------------------------------------
+# Configuration pour l'ingestion des activités
+# Utilisé par :
+# - src/etl/load/mod62_load_activite_table.py (ingestion)
+# - src/etl/transform/mod40_normalise_gsheet.py (normalisation)
+# - src/gene_lignes/mod50_simuler_activites.py (simulation)
+# - src/gene_lignes/mod50_verif_simulation.py (simulation)
+# -----------------------------------------------------------------------
+
+# --- SECTION LOAD (mod62) ---
+expected_cols:
+  - cle_salarie
+  - date_debut
+  - duree_sec
+  - distance_m
+  - type_activite
+  - commentaire
+  - source_donnee
+
+sources_to_replace:
+  - csv_simule
+  - csv_gsheet
+
+# --- SECTION TRANSFORM (mod40) ---
+normalisation:
+  gsheet_cols_required:
+    - Horodateur
+    - Nom
+    - Prénom
+    - Date
+    - Sport type
+    - Distance parcourue en kms
+    - Durée de l'activité
+
+  cols_out:
+    - cle_salarie
+    - date_debut
+    - duree_sec
+    - distance_m
+    - type_activite
+    - commentaire
+    - source_donnee
+  
+  referentiels:
+    rh:
+      required_cols: ["ID salarié", "Nom", "Prénom"]
+    sport:
+      required_cols: ["ID salarié", "Pratique d'un sport"]
+
+# --- SECTION SIMULATION (mod50) ---
+simulation:
+  # Colonnes référentiel RH spécifiques au simulateur
+  rh_cols_required:
+    - ID salarié
+    - Moyen de déplacement
+  
+  # Colonnes référentiel Sport spécifiques au simulateur
+  sport_cols_required:
+    - ID salarié
+    - Pratique d'un sport
+
+  # Colonnes de sortie (doit matcher cols_out de normalisation)
+  cols_out:
+    - cle_salarie
+    - date_debut
+    - duree_sec
+    - distance_m
+    - type_activite
+    - commentaire
+    - source_donnee

@@ -1,0 +1,187 @@
+# docker-compose.yml
+#
+# Objectifs :
+# - Démarrer Kestra (UI + orchestrateur) avec backend PostgreSQL dédié (kestra-db)
+# - Démarrer PostgreSQL métier (sportdb) utilisé par les scripts Python
+# - Permettre à Kestra d'exécuter des tâches dans Docker (plugin docker.Run / runner docker)
+# - Activer explicitement la capacité de "volume mount" côté runner Docker pour les scripts/tasks
+#   (le montage du workspace projet et le masquage du .env se feront dans les tâches Kestra)
+#
+# Remarque :
+# - Le fichier .env du repo n'est pas monté automatiquement dans les conteneurs de tâches.
+#   Pour Kestra, on injecte les variables via env_file (Docker Compose lit le fichier et passe les variables).
+# - Le masquage de /workspace/.env via .env_empty est à configurer dans chaque tâche docker.Run.
+
+name: p12-infra
+
+networks:
+  p12-net:
+    driver: bridge
+
+volumes:
+  kestra_db_data:
+  kestra_storage:
+  sportdb_data:
+
+services:
+  # ---------------------------------------------------------------------------
+  # Base PostgreSQL dédiée à Kestra (repository + queue)
+  # ---------------------------------------------------------------------------
+  kestra-db:
+    image: postgres:18
+    container_name: p12-kestra-db
+    restart: unless-stopped
+    networks: [p12-net]
+    environment:
+      POSTGRES_USER: ${KESTRA_PG_USER:-kestra}
+      POSTGRES_PASSWORD: ${KESTRA_PG_PASSWORD:-k3str4}
+      POSTGRES_DB: ${KESTRA_PG_DB:-kestra}
+      PGDATA: /var/lib/postgresql/18/docker
+
+    volumes:
+      - kestra_db_data:/var/lib/postgresql
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${KESTRA_PG_USER:-kestra} -d ${KESTRA_PG_DB:-kestra}"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+  # ---------------------------------------------------------------------------
+  # Base PostgreSQL métier (SportDataSolution)
+  # - Exposée en local sur 127.0.0.1:5432 pour les usages hors Docker (CLI/pgAdmin).
+  # - Depuis des conteneurs (Kestra tasks), l'hôte est "sportdb" et le port est 5432.
+  # ---------------------------------------------------------------------------
+  sportdb:
+    image: postgres:18
+    container_name: p12-sportdb
+    restart: unless-stopped
+    networks: [p12-net]
+    ports:         
+      # 5432 est réservé à PostgreSQL Windows (v17)
+      # Interface Web Kestra accessible sur http://localhost:8080
+      - "127.0.0.1:5433:5432"     
+    environment:
+      POSTGRES_USER: ${PGUSER:-postgres}
+      POSTGRES_PASSWORD: ${PGPASSWORD:-postgres}
+      POSTGRES_DB: ${PGDATABASE:-SportDataSolution}
+      PGDATA: /var/lib/postgresql/18/docker
+
+    volumes:
+      - sportdb_data:/var/lib/postgresql
+
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${PGUSER:-postgres} -d ${PGDATABASE:-SportDataSolution}"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+  # ---------------------------------------------------------------------------
+  # Kestra (UI + orchestrateur)
+  # ---------------------------------------------------------------------------
+  kestra:
+    image: kestra/kestra:v1.1.4
+    container_name: p12-kestra
+    restart: unless-stopped
+    user: "root"
+    networks: [p12-net]
+    depends_on:
+      kestra-db:
+        condition: service_healthy
+    ports:
+      - "127.0.0.1:${KESTRA_PORT:-8080}:8080"
+
+    # Injecte les variables d'environnement depuis .env sans l'exposer
+    # - Utile pour que Kestra expose les ENV_* via {{ envs.* }} (préfixe configurable ci-dessous). 
+    # :contentReference[oaicite:1]{index=1}
+    env_file:
+      - .env
+
+    volumes:
+      # Stockage Kestra (fichiers internes, logs, uploads, etc.)
+      - kestra_storage:/app/storage
+
+      # Docker socket : indispensable pour io.kestra.plugin.docker.Run
+      - /var/run/docker.sock:/var/run/docker.sock
+
+      # Répertoire temporaire Kestra (recommandé en RW)
+      - ./.kestra/tmp:/tmp/kestra-wd:rw
+
+    # Démarrage en mode "standalone"
+    command: server standalone
+
+    environment:
+      # Configuration Kestra injectée en YAML (doit être strictement valide).
+      # :contentReference[oaicite:2]{index=2}
+      ENV_PGHOST: host.docker.internal
+      ENV_PGPORT: ${PGPORT:-5433}
+      ENV_PGUSER: ${PGUSER:-postgres}
+      ENV_PGPASSWORD: ${PGPASSWORD:-postgres}
+      ENV_PGDATABASE: ${PGDATABASE:-SportDataSolution}
+      ENV_SIMULATION: ${SIMULATION:-0}
+      ENV_FORCE_WEBHOOK: ${FORCE_WEBHOOK:-0}
+      ENV_FORCE_GMAPS: ${FORCE_GMAPS:-0}
+      ENV_GOOGLE_MAPS_API_KEY: ${GOOGLE_MAPS_API_KEY}
+      ENV_SLACK_WEBHOOK_URL: ${SLACK_WEBHOOK_URL}
+      ENV_P12_PSEUDO_SALT: ${P12_PSEUDO_SALT}
+      KESTRA_CONFIGURATION: |
+        datasources:
+          postgres:
+            url: jdbc:postgresql://kestra-db:5432/${KESTRA_PG_DB:-kestra}
+            driver-class-name: org.postgresql.Driver
+            username: ${KESTRA_PG_USER:-kestra}
+            password: ${KESTRA_PG_PASSWORD:-k3str4}
+
+        kestra:
+          # Exposition des variables d'environnement au runtime via {{ envs.* }}
+          # Convention : ENV_FOO se référence via {{ envs.foo }}. :contentReference[oaicite:3]{index=3}
+          variables:
+            env-vars-prefix: "ENV_"
+
+          # Auth UI : selon version, l'activation/désactivation peut être imposée par Kestra.
+          # Pour un POC, vous pouvez gérer les identifiants via l'UI si une page de setup apparaît.
+          # Si vous préférez fixer des credentials dès le compose, décommentez les 2 lignes ci-dessous
+          # et définissez les variables dans .env.
+          #
+          # server:
+          #   basic-auth:
+          #     username: ${KESTRA_BASIC_AUTH_USERNAME:-[email protected]}
+          #     password: ${KESTRA_BASIC_AUTH_PASSWORD:-kestra}
+
+          repository:
+            type: postgres
+          queue:
+            type: postgres
+
+          storage:
+            type: local
+            local:
+              base-path: /app/storage
+
+          tasks:
+            tmp-dir:
+              path: /tmp/kestra-wd/tmp
+
+          # IMPORTANT : activation du "volume-enabled" recommandé pour le runner Docker. :contentReference[oaicite:4]{index=4}
+          # Cela permet d'utiliser des bind-mounts dans les tâches (ex: /workspace).
+          plugins:
+            configurations:
+              - type: io.kestra.plugin.scripts.runner.docker.Docker
+                values:
+                  volume-enabled: true
+
+          url: http://localhost:${KESTRA_PORT:-8080}/
+
+  # ---------------------------------------------------------------------------
+  # Image "runner Python" (facultatif dans le compose)
+  # - Objectif : builder une image unique pour exécuter tes scripts via docker.Run.
+  # - Cette image n'a pas besoin de tourner en service.
+  # ---------------------------------------------------------------------------
+  python-runner:
+    profiles: ["runner"]
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: p12-python-runner:latest
+    container_name: p12-python-runner
+    command: ["python", "--version"]
+    networks: [p12-net]

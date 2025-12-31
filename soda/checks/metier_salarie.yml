@@ -1,0 +1,13 @@
+checks for metier.salarie:
+- row_count:
+    fail: when <= 0
+    warn: when < 100
+    name: 'Volumétrie : avertir si < 100 ; échouer si <= 0'
+- missing_count(cle_salarie) = 0:
+    name: 'Complétude : aucun NULL sur cle_salarie'
+- duplicate_count(cle_salarie) = 0:
+    name: 'Unicité : aucun doublon sur cle_salarie'
+- missing_count(nom) = 0:
+    name: 'Complétude : aucun NULL sur nom'
+- missing_count(prenom) = 0:
+    name: 'Complétude : aucun NULL sur prenom'

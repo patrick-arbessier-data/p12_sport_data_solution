@@ -1,0 +1,35 @@
+checks for metier.activite:
+- row_count:
+    fail: when <= 0
+    warn: when < 100
+    name: 'Volumétrie : avertir si < 100 ; échouer si <= 0'
+- missing_count(cle_salarie) = 0:
+    name: 'Complétude : aucun NULL sur cle_salarie'
+- missing_count(date_debut) = 0:
+    name: 'Complétude : aucun NULL sur date_debut'
+- missing_count(source_donnee) = 0:
+    name: 'Complétude : aucun NULL sur source_donnee'
+- missing_count(type_activite) = 0:
+    name: 'Complétude : aucun NULL sur type_activite'
+- missing_count(duree_sec) = 0:
+    name: 'Complétude : aucun NULL sur duree_sec'
+- missing_count(flag_slack) = 0:
+    name: 'Complétude : aucun NULL sur flag_slack'
+- duplicate_count(cle_salarie, date_debut, source_donnee) = 0:
+    name: 'Unicité : aucun doublon sur cle_salarie, date_debut, source_donnee'
+- values in (cle_salarie) must exist in metier.salarie (cle_salarie):
+    name: 'Référentiel : cle_salarie présent dans metier.salarie(cle_salarie)'
+- invalid_count(source_donnee) = 0:
+    valid values:
+    - csv_gsheet
+    - csv_simule
+    name: 'Domaine : aucune valeur invalide sur source_donnee (valeurs autorisées : csv_gsheet, csv_simule)'
+- failed rows:
+    name: Distance négative (distance_m < 0)
+    fail query: "SELECT *\nFROM metier.activite\nWHERE distance_m IS NOT NULL\n  AND distance_m < 0\n"
+    fail: when > 0
+- failed rows:
+    name: date_debut hors fenêtre 12 mois (Europe/Paris)
+    fail query: "SELECT *\nFROM metier.activite\nWHERE ((date_debut AT TIME ZONE 'Europe/Paris')::date < (CURRENT_DATE - INTERVAL\
+      \ '12 months'))\n   OR ((date_debut AT TIME ZONE 'Europe/Paris')::date > CURRENT_DATE)\n"
+    fail: when > 0

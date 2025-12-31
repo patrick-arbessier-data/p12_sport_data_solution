@@ -1,0 +1,16 @@
+# -------------------------------------------------------------------
+# SodaCL - Datasource PostgreSQL (Soda v3 / Soda Core 3.x)
+# Objectif : déclarer une connexion Postgres en réutilisant les variables
+#            d'environnement PG* (injectées via --env-file et/ou -e).
+# Usage : soda scan -d sportdata -c soda/config/ds_postgres.yml soda/checks/<fichier>.yml
+# -------------------------------------------------------------------
+
+data_source sportdata:
+  type: postgres
+
+  # Connexion PostgreSQL (toutes les valeurs viennent des variables d'environnement)
+  host: ${PGHOST}
+  port: "${PGPORT}"
+  username: ${PGUSER}
+  password: ${PGPASSWORD}
+  database: ${PGDATABASE}

@@ -1,0 +1,29 @@
+# Configuration des paramètres de validation
+# et d'attribution des avantages
+
+# Adresse "constante"
+adresse_entreprise: "1362 Av. des Platanes, 34970 Lattes"
+
+# Simulation initiale
+taux_prime: "0.05"
+seuil_km_marche_course: "15"
+seuil_km_velo_autres: "25"
+jours_bien_etre: "5"
+min_activites_bien_etre: "15"
+montant_prime_fixe: "1500"
+
+# Simulation 1
+# taux_prime: "0.04"
+# seuil_km_marche_course: "15"
+# seuil_km_velo_autres: "25"
+# jours_bien_etre: "5"
+# min_activites_bien_etre: "15"
+# montant_prime_fixe: "1000"
+
+# Simulation 2
+# taux_prime: "0.06"
+# seuil_km_marche_course: "15"
+# seuil_km_velo_autres: "25"
+# jours_bien_etre: "5"
+# min_activites_bien_etre: "15"
+# montant_prime_fixe: "2000"

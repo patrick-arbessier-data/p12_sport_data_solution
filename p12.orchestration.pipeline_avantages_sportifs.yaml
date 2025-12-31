@@ -1,0 +1,534 @@
+id: pipeline_avantages_sportifs
+namespace: p12.orchestration
+
+# Valeurs par défaut pour toutes les tâches Docker Run du flow :
+# - même image Python
+# - mêmes montages (repo + venv persistée + cache pip)
+# - mêmes variables d’environnement (Postgres + pipeline + intégrations)
+pluginDefaults:
+  - type: io.kestra.plugin.docker.Run
+    forced: true
+
+    values:
+      # Nom du réseau Docker
+      networkMode: p12-infra_p12-net
+      volumes:
+        - /run/desktop/mnt/host/d/projets/p12_gerer_projet_infra:/workspace
+        - p12_kestra_pydeps:/pydeps
+        - p12_kestra_pip_cache:/pip-cache
+
+  # 2) Image Python par défaut, mais surchageable
+  - type: io.kestra.plugin.docker.Run
+    values:
+      containerImage: python:3.13-slim
+
+      env:
+        # Connexion Postgres (attendue via variables PG*)
+        PGHOST: "{{ envs.pghost }}"
+        PGPORT: "{{ envs.pgport }}"
+        PGUSER: "{{ envs.pguser }}"
+        PGPASSWORD: "{{ envs.pgpassword }}"
+        PGDATABASE: "{{ envs.pgdatabase }}"
+
+        # Variable génération de déclaratifs + contrôles
+        SIMULATION: "{{ envs.simulation }}"
+
+        # Variable pour forcer publication Slack
+        FORCE_WEBHOOK: "{{ envs.force_webhook }}"
+
+        # Variable pour forcer récup distances via G Maps
+        FORCE_GMAPS: "{{ envs.force_gmaps }}"
+
+        # Intégrations / secrets
+        GOOGLE_MAPS_API_KEY: "{{ envs.google_maps_api_key }}"
+        SLACK_WEBHOOK_URL: "{{ envs.slack_webhook_url }}"
+        P12_PSEUDO_SALT: "{{ envs.p12_pseudo_salt }}"
+
+# ============================================================
+# Déclenchement automatique du flow
+#
+# Objectifs :
+# - Planifier l'exécution mensuelle automatique du workflow enrichi.
+# - Utiliser un trigger de type Schedule avec une expression cron.
+# ------------------------------------------------------------
+# Détail du cron "0 9 * * *" (Europe/Paris) :
+#   - minute  : 0
+#   - heure   : 9
+#   - jour    : tous
+#   - mois    : tous
+#   - jour_semaine : tous
+#   => Exécution tous les jours à 9h00, heure de Paris.
+# ============================================================
+triggers:
+  - id: planif_jour_09
+    type: io.kestra.plugin.core.trigger.Schedule
+    description: "Exécuter le workflow tous les jours à 9h (heure de Paris)."
+    cron: "0 9 * * *"
+    timezone: "Europe/Paris"
+
+tasks:
+  # ---------------------------------------
+  # [MOD10] SETUP : installation dépendances Python (venv persistée)
+  # Repère doc : MOD10
+  # ---------------------------------------
+  - id: mod10_install_requirements
+    type: io.kestra.plugin.docker.Run
+    commands:
+      - sh
+      - -lc
+      - |
+        set -e
+
+        REQ_HASH="$(python - <<'PY'
+        import hashlib, pathlib
+        p = pathlib.Path("/workspace/requirements.txt")
+        print(hashlib.sha256(p.read_bytes()).hexdigest())
+        PY
+        )"
+
+        if [ -f /pydeps/requirements.sha256 ] \
+           && [ "$(cat /pydeps/requirements.sha256)" = "$REQ_HASH" ] \
+           && [ -x /pydeps/venv/bin/python ]; then
+          echo "Dépendances déjà installées (requirements inchangé)."
+        else
+          echo "Installation deps (requirements a changé ou venv absent)."
+          rm -rf /pydeps/venv
+          python -m venv /pydeps/venv
+          /pydeps/venv/bin/python -m pip install --upgrade pip
+          PIP_CACHE_DIR=/pip-cache /pydeps/venv/bin/pip install -r /workspace/requirements.txt
+          echo "$REQ_HASH" > /pydeps/requirements.sha256
+        fi
+
+        # Sanity check imports (dépendances clés attendues par le pipeline)
+        /pydeps/venv/bin/python -c "import pandas, dotenv; print('sanity_ok')"
+
+  # ---------------------------------------
+  # [MOD20] SOURCE : extraction GSheet (CSV) -> data/raw
+  # Repère doc : MOD20
+  # ---------------------------------------
+  - id: mod20_recup_gsheet
+    type: io.kestra.plugin.docker.Run
+    commands:
+      - sh
+      - -lc
+      - cd /workspace && /pydeps/venv/bin/python -m src.etl.extract.mod20_recup_gsheet --origin KESTRA
+
+  # ---------------------------------------
+  # [MOD21] SOURCE : détection GSheet "changed" (flag -> output)
+  # Repère doc : MOD21
+  # Output Kestra : gsheet_changed="1" si changement détecté, sinon "0"
+  # ---------------------------------------
+  - id: mod21_gsheet_changed
+    type: io.kestra.plugin.docker.Run
+    commands:
+      - sh
+      - -lc
+      - |
+        set -e
+        FLAG="/workspace/data/raw/_decla_sheet_unchanged.flag"
+
+        if [ -f "$FLAG" ]; then
+          echo "MOD21: GSheet inchangée -> gsheet_changed=0"
+          echo '::{"outputs":{"gsheet_changed":"0"}}::'
+        else
+          echo "MOD21: GSheet modifiée -> gsheet_changed=1"
+          echo '::{"outputs":{"gsheet_changed":"1"}}::'
+        fi
+  # ---------------------------------------
+  # [MOD22] SOURCE : détection config_param_avantage.yml "inchangé" (hash -> output)
+  # Repère doc : MOD22
+  # Output Kestra : param_changed="1" si changement détecté (ou baseline absente), sinon "0"
+  # ---------------------------------------
+  - id: mod22_param_changed
+    type: io.kestra.plugin.docker.Run
+    commands:
+      - sh
+      - -lc
+      - |
+        set -e
+
+        CFG="/workspace/src/utils/config_param_avantage.yml"
+        HASH_FILE="/pydeps/config_param_avantage.sha256"
+
+        if [ ! -f "$CFG" ]; then
+          echo "ERREUR: fichier introuvable: $CFG"
+          exit 2
+        fi
+
+        CFG_HASH="$(python - <<'PY'
+        import hashlib, pathlib
+        p = pathlib.Path("/workspace/src/utils/config_param_avantage.yml")
+        print(hashlib.sha256(p.read_bytes()).hexdigest())
+        PY
+        )"
+
+        if [ -f "$HASH_FILE" ] && [ "$(cat "$HASH_FILE")" = "$CFG_HASH" ]; then
+          echo "MOD22: config_param_avantage.yml inchangée -> param_changed=0 (prochaine étape: décision S/G/P)"
+          echo '::{"outputs":{"param_changed":"0"}}::'
+        else
+          echo "MOD22: config_param_avantage.yml modifiée -> param_changed=1 (hash mis à jour, prochaine étape: décision S/G/P)"
+          echo "$CFG_HASH" > "$HASH_FILE"
+          echo '::{"outputs":{"param_changed":"1"}}::'
+        fi
+
+  # ---------------------------------------
+  # [MOD24] SOURCE : détection Excel RH/Sportive "inchangé" (hash -> output)
+  # Repère doc : MOD24
+  # Output Kestra : excel_changed="1" si changement détecté (ou baseline absente), sinon "0".
+  # ---------------------------------------
+  - id: mod24_excel_changed
+    type: io.kestra.plugin.docker.Run
+    commands:
+      - sh
+      - -lc
+      - |
+        set -e
+
+        RAW_DIR="/workspace/data/raw"
+        HASH_FILE="/pydeps/excel_inputs.sha256"
+
+        EXCEL_HASH="$(/pydeps/venv/bin/python - <<'PY'
+        import hashlib
+        from pathlib import Path
+
+        raw = Path("/workspace/data/raw")
+        candidates = sorted(raw.glob("*.xlsx"))
+
+        if not candidates:
+            raise FileNotFoundError("MOD24: aucun fichier .xlsx trouvé dans /workspace/data/raw")
+
+        # Identification simple des 2 fichiers attendus (RH + Sportive).
+        rh = [p for p in candidates if "rh" in p.stem.lower()]
+        sp = [p for p in candidates if "sportive" in p.stem.lower() or "sport" in p.stem.lower()]
+
+        if len(rh) == 1 and len(sp) == 1:
+            rh_file, sp_file = rh[0], sp[0]
+        elif len(candidates) == 2:
+            rh_file, sp_file = candidates[0], candidates[1]
+        else:
+            names = ", ".join(p.name for p in candidates)
+            raise RuntimeError(f"MOD24: identification RH/Sportive impossible parmi: {names}")
+
+        h = hashlib.sha256()
+        for p in (rh_file, sp_file):
+            h.update(p.name.encode("utf-8"))
+            h.update(p.read_bytes())
+        print(h.hexdigest())
+        PY
+        )"
+
+        if [ -f "$HASH_FILE" ] && [ "$(cat "$HASH_FILE")" = "$EXCEL_HASH" ]; then
+          echo "MOD24: Excels inchangés -> excel_changed=0"
+          echo '::{"outputs":{"excel_changed":"0"}}::'
+        else
+          echo "MOD24: Excels modifiés (ou baseline absente) -> excel_changed=1"
+          echo "$EXCEL_HASH" > "$HASH_FILE"
+          echo '::{"outputs":{"excel_changed":"1"}}::'
+        fi
+
+  # ---------------------------------------
+  # [MOD25] SOURCE : bootstrap RH (socle absent en base -> output)
+  # Repère doc : MOD25
+  # Output Kestra : bootstrap_rh="1" si tables RH absentes / vides, sinon "0".
+  # ---------------------------------------
+  - id: mod25_bootstrap_rh
+    type: io.kestra.plugin.docker.Run
+    commands:
+      - sh
+      - -lc
+      - |
+        set -e
+
+        BOOTSTRAP_RH="$(/pydeps/venv/bin/python - <<'PY'
+        import os
+        import psycopg
+
+        def env(name: str) -> str:
+            value = os.getenv(name)
+            if not value:
+                raise RuntimeError(f"MOD25: variable manquante: {name}")
+            return value
+
+        conn = psycopg.connect(
+            host=env("PGHOST"),
+            port=env("PGPORT"),
+            user=env("PGUSER"),
+            password=env("PGPASSWORD"),
+            dbname=env("PGDATABASE"),
+            connect_timeout=5,
+        )
+
+        with conn.cursor() as cur:
+            def table_exists(schema: str, table: str) -> bool:
+                cur.execute(
+                    "select exists (select 1 from information_schema.tables where table_schema=%s and table_name=%s)",
+                    (schema, table),
+                )
+                return bool(cur.fetchone()[0])
+
+            required = [("metier", "salarie"), ("sec", "rh_salarie")]
+            if not all(table_exists(s, t) for s, t in required):
+                print("1")
+            else:
+                cur.execute("select (select count(*) from metier.salarie) + (select count(*) from sec.rh_salarie)")
+                cnt = int(cur.fetchone()[0])
+                print("1" if cnt == 0 else "0")
+
+        conn.close()
+        PY
+        )"
+
+        if [ "$BOOTSTRAP_RH" = "1" ]; then
+          echo "MOD25: socle RH absent/vidé -> bootstrap_rh=1"
+          echo '::{"outputs":{"bootstrap_rh":"1"}}::'
+        else
+          echo "MOD25: socle RH présent -> bootstrap_rh=0"
+          echo '::{"outputs":{"bootstrap_rh":"0"}}::'
+        fi
+
+# [MOD23] DEBUG : log des flags S/G/P (lecture immédiate des outputs MOD21/MOD22)
+  # Repère doc : MOD23
+  # ---------------------------------------
+  - id: mod23_log_flags_sgp
+    type: io.kestra.plugin.core.log.Log
+    message: |
+      Flags S/G/P (+ garde-fous E/BOOTSTRAP) :
+      - S (envs.simulation)   = {{ envs.simulation }}
+      - G (gsheet_changed)    = {{ outputs.mod21_gsheet_changed.vars.gsheet_changed }}
+      - P (param_changed)     = {{ outputs.mod22_param_changed.vars.param_changed }}
+      - E (excel_changed)     = {{ outputs.mod24_excel_changed.vars.excel_changed }}
+      - BOOTSTRAP_RH          = {{ outputs.mod25_bootstrap_rh.vars.bootstrap_rh }}
+      - FORCE_GMAPS           = {{ envs.force_gmaps }}
+
+
+  # ---------------------------------------
+  # [MOD30] ROUTAGE PRINCIPAL : exécuter l'aval si S=1 OU G=1 OU P=1 OU E=1 OU BOOTSTRAP_RH=1
+  # Repère doc : MOD30
+  # Cas 0 : S=0, G=0, P=0 -> fin immédiate après préambule
+  # ---------------------------------------
+  - id: mod30_route_sgp
+    type: io.kestra.plugin.core.flow.If
+    condition: >-
+      {{
+        outputs.mod21_gsheet_changed.vars.gsheet_changed == '1'
+        or envs.simulation == '1'
+        or outputs.mod22_param_changed.vars.param_changed == '1'
+        or outputs.mod24_excel_changed.vars.excel_changed == '1'
+        or outputs.mod25_bootstrap_rh.vars.bootstrap_rh == '1'
+
+      }}
+    then:
+      # ---------------------------------------
+      # [MOD40] TRANSFORM : normalisation GSheet (uniquement si G=1)
+      # Repère doc : MOD40
+      # ---------------------------------------
+      - id: mod40_if_normalise
+        type: io.kestra.plugin.core.flow.If
+        condition: "{{ outputs.mod21_gsheet_changed.vars.gsheet_changed == '1' }}"
+        then:
+          - id: mod40_normalise_gsheet
+            type: io.kestra.plugin.docker.Run
+            commands:
+              - sh
+              - -lc
+              - cd /workspace && /pydeps/venv/bin/python -m src.etl.transform.mod40_normalise_gsheet --origin KESTRA
+
+      # ---------------------------------------
+      # [MOD50] SIMULATION : génération + contrôle (uniquement si S=1)
+      # Repère doc : MOD50
+      # ---------------------------------------
+      - id: mod50_if_simulation
+        type: io.kestra.plugin.core.flow.If
+        condition: "{{ envs.simulation == '1' }}"
+        then:
+          - id: mod50_simuler_activites
+            type: io.kestra.plugin.docker.Run
+            commands:
+              - sh
+              - -lc
+              - cd /workspace && /pydeps/venv/bin/python -m src.gene_lignes.mod50_simuler_activites --origin KESTRA
+
+          - id: mod50_verif_simulation
+            type: io.kestra.plugin.docker.Run
+            commands:
+              - sh
+              - -lc
+              - cd /workspace && /pydeps/venv/bin/python -m src.gene_lignes.mod50_verif_simulation --origin KESTRA
+
+      # ---------------------------------------
+      # [MOD60] LOAD : tables RH (uniquement si E=1 ou BOOTSTRAP_RH=1)
+      # Repère doc : MOD60
+      # ---------------------------------------
+      - id: mod60_if_load_rh_tables
+        type: io.kestra.plugin.core.flow.If
+        condition: "{{ outputs.mod24_excel_changed.vars.excel_changed == '1' or outputs.mod25_bootstrap_rh.vars.bootstrap_rh == '1' }}"
+        then:
+          - id: mod60_load_rh_tables
+            type: io.kestra.plugin.docker.Run
+            commands:
+              - sh
+              - -lc
+              - cd /workspace && /pydeps/venv/bin/python -m src.etl.load.mod60_load_rh_tables --origin KESTRA
+
+      # ---------------------------------------
+      # [MOD61] LOAD : paramètres avantages (toujours, dès que MOD30 est vrai)
+      # Repère doc : MOD61
+      # ---------------------------------------
+      - id: mod61_load_param_avantage
+        type: io.kestra.plugin.docker.Run
+        commands:
+          - sh
+          - -lc
+          - |
+            set -e
+            cd /workspace
+            /pydeps/venv/bin/python -m src.etl.load.mod61_load_param_avantage --origin KESTRA
+
+      # ---------------------------------------
+      # [MOD62] LOAD : metier.activite (uniquement si DATA_CHANGED = S=1 ou G=1)
+      # Repère doc : MOD62
+      # ---------------------------------------
+      - id: mod62_if_load_activite
+        type: io.kestra.plugin.core.flow.If
+        condition: "{{ outputs.mod21_gsheet_changed.vars.gsheet_changed == '1' or envs.simulation == '1' }}"
+        then:
+          - id: mod62_load_activite_table
+            type: io.kestra.plugin.docker.Run
+            commands:
+              - sh
+              - -lc
+              - cd /workspace && /pydeps/venv/bin/python -m src.etl.load.mod62_load_activite_table --origin KESTRA
+
+      # ---------------------------------------
+      # [MOD70] DQ : contrôles Soda sur tables (toujours, dès que MOD30 est vrai)
+      # Repère doc : MOD70
+      # ---------------------------------------
+      - id: mod70_soda_checks_tables
+        type: io.kestra.plugin.docker.Run
+        containerImage: sodadata/soda-core:v3.0.32
+        networkMode: p12-infra_p12-net
+        entryPoint:
+          - sh
+          - -lc
+        env:
+          PGHOST: sportdb
+          PGPORT: "5432"
+          PGUSER: "{{ envs.pguser }}"
+          PGPASSWORD: "{{ envs.pgpassword }}"
+          PGDATABASE: "{{ envs.pgdatabase }}"
+        commands:
+          - |
+            set -e
+
+            echo "START soda"
+            echo "Cible Postgres : ${PGHOST}:${PGPORT}/${PGDATABASE}"
+
+            soda scan -d sportdata -c /workspace/soda/config/ds_postgres.yml /workspace/soda/checks/metier_salarie.yml
+            soda scan -d sportdata -c /workspace/soda/config/ds_postgres.yml /workspace/soda/checks/metier_activite.yml
+
+            echo "END soda"
+
+      # ---------------------------------------
+      # [MOD80] ENRICH : distances (Google Maps) si nécessaire
+      # Repère doc : MOD80
+      # Règle : exécuter si FORCE_GMAPS=1 ou si E=1 ou si BOOTSTRAP_RH=1
+      # ---------------------------------------
+      - id: mod80_if_recup_distances
+        type: io.kestra.plugin.core.flow.If
+        condition: "{{ envs.force_gmaps == '1' or outputs.mod24_excel_changed.vars.excel_changed == '1' or outputs.mod25_bootstrap_rh.vars.bootstrap_rh == '1' }}"
+        then:
+          - id: mod80_recup_distances
+            type: io.kestra.plugin.docker.Run
+            commands:
+              - sh
+              - -lc
+              - cd /workspace && /pydeps/venv/bin/python -m src.maps.mod80_recup_distances --origin KESTRA
+
+      # ---------------------------------------
+      # [MOD90] BI : préparation vues BI + éligibilité + KPI
+      # Repère doc : MOD90
+      # ---------------------------------------
+      - id: mod90_prepa_vues_bi
+        type: io.kestra.plugin.docker.Run
+        commands:
+          - sh
+          - -lc
+          - cd /workspace && /pydeps/venv/bin/python -m src.etl.bi.mod90_prepa_vues_bi --origin KESTRA
+
+      - id: mod90_prepa_eligibilite
+        type: io.kestra.plugin.docker.Run
+        commands:
+          - sh
+          - -lc
+          - cd /workspace && /pydeps/venv/bin/python -m src.etl.bi.mod90_prepa_eligibilite --origin KESTRA
+
+      - id: mod90_prepa_vues_kpi
+        type: io.kestra.plugin.docker.Run
+        commands:
+          - sh
+          - -lc
+          - cd /workspace && /pydeps/venv/bin/python -m src.etl.bi.mod90_prepa_vues_kpi --origin KESTRA
+
+      # ---------------------------------------
+      # [MOD71] DQ : contrôles Soda sur vues BI
+      # Repère doc : MOD71
+      # ---------------------------------------
+      - id: mod71_soda_checks_bi
+        type: io.kestra.plugin.docker.Run
+        containerImage: sodadata/soda-core:v3.0.32
+        networkMode: p12-infra_p12-net
+        entryPoint:
+          - sh
+          - -lc
+        env:
+          PGHOST: sportdb
+          PGPORT: "5432"
+          PGUSER: "{{ envs.pguser }}"
+          PGPASSWORD: "{{ envs.pgpassword }}"
+          PGDATABASE: "{{ envs.pgdatabase }}"
+        commands:
+          - |
+            set -e
+
+            echo "START soda"
+            echo "Cible Postgres : ${PGHOST}:${PGPORT}/${PGDATABASE}"
+
+            soda scan -d sportdata -c /workspace/soda/config/ds_postgres.yml /workspace/soda/checks/transverse_coherence_bi.yml
+            echo "END soda"
+
+      # ---------------------------------------
+      # [MOD95] OPS : historisation KPI / simulations
+      # Repère doc : MOD95
+      # ---------------------------------------
+      - id: mod95_run_histo
+        type: io.kestra.plugin.docker.Run
+        commands:
+          - sh
+          - -lc
+          - |
+              cd /workspace
+              /pydeps/venv/bin/python -m src.etl.bi.mod95_run_histo --origin KESTRA --log-level INFO
+
+      # ---------------------------------------
+      # [MOD99] NOTIF : Slack (uniquement si G=1)
+      # Repère doc : MOD99
+      # ---------------------------------------
+      - id: mod99_if_slack
+        type: io.kestra.plugin.core.flow.If
+        condition: "{{ outputs.mod21_gsheet_changed.vars.gsheet_changed == '1' }}"
+        then:
+          - id: mod99_publish_slack
+            type: io.kestra.plugin.docker.Run
+            env:
+              SLACK_WEBHOOK_URL: "{{ envs.slack_webhook_url }}"
+              FORCE_WEBHOOK: "{{ envs.force_webhook }}"
+            commands:
+              - sh
+              - -lc
+              - |
+                cd /workspace
+                echo "START webhook"
+                /pydeps/venv/bin/python -m src.slack.mod99_publish_slack --origin KESTRA                
+                rc=$?
+                echo "END webhook (rc=$rc)"
+                exit $rc

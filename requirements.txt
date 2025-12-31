@@ -1,0 +1,28 @@
+# ============================================================
+# P12 - Avantages Sportifs
+# Dépendances Python
+# ============================================================
+
+# --- Chargement configuration / variables d'environnement ---
+python-dotenv
+
+# --- Parsing YAML ---
+PyYAML
+
+# --- Manipulation données ---
+pandas
+openpyxl
+
+# --- Accès PostgreSQL ---
+SQLAlchemy
+psycopg[binary]
+
+# --- Appels HTTP (Slack webhook, Google Maps) ---
+requests
+
+# --- Qualité de données (Soda) ---
+# Qualité de données (Soda) : exécution via image Docker sodadata/soda-library
+# --> pas d'installation dans le venv Python 3.13
+
+# --- Tests ---
+pytest

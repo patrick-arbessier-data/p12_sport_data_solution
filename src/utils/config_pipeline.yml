@@ -1,0 +1,134 @@
+# Configuration des paramètres contextuels et métier du pipeline
+#Utilisée pour la génération des déclaratifs, pour les transformations et règles métiers d'ligibilité
+
+regles_eligibilite:
+  fenetre_activites:
+    # Fenêtre temporelle utilisée pour compter les activités (journées bien-être)
+    # Types supportés : GLISSANTE_MENSUELLE (ANNEE_CIVILE non implémentée)
+    type_fenetre: GLISSANTE_MENSUELLE
+
+    # Nombre de mois à couvrir (12 = 12 derniers mois)
+    nb_mois: 12
+
+    # Si false : prendre uniquement des mois complets (exécution le 17/12/2025 -> 01/12/2024..30/11/2025)
+    # Si true  : inclure le mois courant (exécution le 17/12/2025 -> 01/01/2025..17/12/2025 ou équivalent selon implémentation)
+    inclure_mois_courant: true
+
+    # Référence temporelle : date d'exécution en Europe/Paris
+    reference_date: DATE_EXECUTION_PARIS
+
+activites:
+  # Sur-génération puis sous-échantillonnage
+  facteur_surgeneration: 1.30  # pour sécuriser un surplus
+
+  # Nombre total de lignes (activités) à générer sur 12 mois
+  # De mini : 3000 à maxi : 10 000 (--> correspond à un nb d'activités plausible pour 160 salariés)
+  nb_lignes: 7000
+
+  # Seed de génération pour reproductibilité
+  random_seed: 42
+
+  # Scénario de volumétrie : pessimiste | realiste | optimiste
+  # Si scénraio pessimiste :  diminuer le nombre de lignes générées (=<6000)
+  scenario: "realiste"
+
+  # Plages mensuelles (min, max) d'activités par profil, par scénario.
+  # Profils :
+  # - faible  : groupe A (pas de sport ET déplacement non actif)
+  # - moyen   : groupe B (sport OU déplacement actif) hors groupe C
+  # - eleve   : groupe C (sport ET déplacement actif)
+  scenarios:
+    pessimiste:
+      faible: [0, 1]
+      moyen: [2, 4]
+      eleve: [5, 7]
+    realiste:
+      faible: [0, 3]
+      moyen: [4, 7]
+      eleve: [8, 12]
+    optimiste:
+      faible: [0, 5]
+      moyen: [6, 10]
+      eleve: [11, 16]
+
+referentiels:
+  # Valeurs attendues dans la colonne mod_depl_decl du fichier RH
+  modes_deplacement:
+    - "Transports en commun"
+    - "véhicule thermique/électrique"
+    - "Marche/running"
+    - "Vélo/Trottinette/Autres"
+
+  # Valeurs attendues dans  colonne "Pratique d'un sport" du fichier Données Sportives
+  # Sert à alimenter metier.activite.type_activite lors de la simulation.
+  sports_pratiques:
+    - "Randonnée"
+    - "Triathlon"
+    - "Runing"
+    - "Natation"
+    - "Escalade"
+    - "Équitation"
+    - "Voile"
+    - "Tennis de table"
+    - "Football"
+    - "Rugby"
+    - "Judo"
+    - "Basketball"
+    - "Boxe"
+    - "Tennis"
+    - "Badminton"
+
+regles_simulation:
+  # Références de temps pour construire des durées plausibles,
+  # puis pour déduire une distance.
+  refs_temps_par_mode:
+    marche_running:
+      distance_ref_km: 15
+      duree_ref_sec: 8100   # [Estimé] 2h15
+    velo_trott_autres:
+      distance_ref_km: 25
+      duree_ref_sec: 4500   # [Estimé] 1h15
+    
+  # Plage de distance relative à la distance de référence (15 km ou 25 km)
+  distance_ratio:
+    min: 0.10
+    max: 1.00
+    
+  # Bornes de durée (en secondes) selon la catégorie de sport.
+  duree_bornes_sec:
+    endurance:
+      min: 1200   # 20 min
+      max: 10800  # 3 h
+    non_endurance:
+      min: 900    # 15 min
+      max: 7200   # 2 h
+
+  # Variabilité autour du temps de référence (fourchette bas/haut)
+  facteurs_duree:
+    min: 0.80
+    max: 1.20
+  
+  #Sports considérés comme catégorie vitesse/distance pour simulation
+  # Règle associée : si mod_depl_decl est non actif, alors :
+  #  si type_activite ∈ sports_endurance → référence marche_running
+  #  sinon → référence velo_trott_autres
+  sports_endurance:
+    - "Randonnée"
+    - "Triathlon"
+    - "Runing"
+    - "Natation"
+
+# Sports n'appartenant pas à la section précédente. 
+# La distance parcourue n'est pas prise en compte.
+  sports_non_endurance:
+    - "Escalade"
+    - "Équitation"
+    - "Voile"
+    - "Tennis de table"
+    - "Football"
+    - "Rugby"
+    - "Judo"
+    - "Basketball"
+    - "Boxe"
+    - "Tennis"
+    - "Badminton"

@@ -1,0 +1,87 @@
+# 🌳 Arborescence de p12_gerer_projet_infra
+
+📁 p12_gerer_projet_infra/
+├── 📁 data/
+│   ├── 📁 processed/
+│   │   └── 📊 <Date>_declaratif_activites_gsheet.csv       CSV activités conformes (anomalies tolérées) prêt à être chargés. Historisés.
+│   └── 📁 raw/
+│       ├── 📊 Données+RH.xlsx                              Fichier salariés (données SENSIBLES)
+│       ├── 📊 Données+Sportive.xlsx                        Fichier source fourni (ID salarié / Sport défini)
+│       ├── 📊 declaratif_activites_12m.csv                 CSV des activités créées par génération (peut être absent si simu off)
+│       └── 📊 <Date>_decla_gsheet.csv                      CSV des extractions gsheet. Historisés
+├── 📁 docs/
+│   ├── 📁 orchestration/
+│   │   ├── 📝 details_yaml.md			    	          Explications des tâches du YAML Kestra
+│   │   ├── 📝 plan_de_test.md			    	          Plan de tests des 8 scénarios d'exécution
+│   │   ├── 📝 schema_logique.md		    	          Schéma des blocs / modules du pipeline
+│   │   └── 📝 table_decision.md		    	               Table de décision pour chaque scénario
+│   ├── 📁 schemas/
+│   │   ├── 📄 01_pipeline.md					          Schéma de flux du pipeline
+│   │   ├── 📄 04_arborescence.txt 			    	     Arborescence du projet
+│   │   └── 📄 03_erd.md						          ERD
+├── 📁 logs/                                    
+│       └── 📊 <Date>_gsheet_anomalie.csv                   Fichiers générés si anomalies détectées à la normalisation. Historisés
+│       └── 📊 <Date>_gsheet_erreurs.csv                    Fichier générés si erreurs détectées à la normalisation. Historisés
+├── 📁 outputs/
+│       └── ⚙️ rapports_SportDataSolution.pbix              Rapports Power BI
+├── 📁 soda/
+│   └── 📁 checks/
+│   │   │   ├── ⚙️ metier_salarie.yml                       Checks table metier.salariés (2 checks)
+│   │   │   ├── ⚙️ metier_activite.yml                      Checks table metier.activité (7 checks)
+│   │   │   └── ⚙️ transverse_coherence_bi.yml              Checks de cohérence des vues (64 checks)
+│   ├── 📁 config/
+│   │   ├── ⚙️ ds_postgres.yml   		                    Configuration / paramétrage SODA
+│   └── 🐍 run_soda_docker.py			                    Utilisé en CLI - exécute les checks Soda (connexion à PostgreSQL, lance un run)
+├── 📁 sql/
+│   ├── 📁 ddl/
+│   │   └── 📄 create_all.sql					          Bootstrap de création des schémas/tables (sec_*, metier_*, ops_*) + PK/FK
+│   ├── 📁 views/
+│   │   ├── 📄 vue_avantages_salarie.sql				Vue spécifique
+│   │   ├── 📄 vue_bi_activité_salarie.sql				Vue spécifique
+│   │   ├── 📄 vue_bi_ctrl_trajet.sql   				Vue spécifique
+│   │   ├── 📄 vue_bi_param_effectif.sql				Vue spécifique
+│   │   ├── 📄 vue_bi_salarie.sql       				Vue spécifique
+│   │   ├── 📄 vue_bi_elig_bien_etre.sql				Vue spécifique
+│   │   ├── 📄 vue_elig_prime.sql       				Vue spécifique
+│   │   └── 📄 vues_kpi.sql					            Vues SQL pour KPI appelées par mod90_prepa_vues_kpi.py
+│   ├── 📄 update_activite.sql			                Requêtes SQL de mise à jour des activités
+│   ├── 📄 update_param.sql			                    Requêtes SQL de mise à jour des paramètres
+│   └── 📄 upsert_salarie.sql			                Requêtes SQL d'insert / mise à jour des salariés
+├── 📁 src/
+│   ├── 📁 etl/
+│   │   ├── 📁 bi/
+│   │   │   ├── 🐍 mod90_prepa_vues_bi.py       		     Prépare 4 vues BI dans schéma 'metier' 
+│   │   │   ├── 🐍 mod90_prepa_eligibilite.py       		Prépare 3 vues éligibilité dans schéma 'metier'
+│   │   │   ├── 🐍 mod90_prepa_vues_kpi.py            		Prépare 6 vues KPIs dans schéma 'ops' (à partir de sql/views/vues_kpi.sql)
+│   │   │   └── 🐍 mod95_run_histo.py                 		Historise des vues
+│   │   ├── 📁 extract/
+│   │   │   └── 🐍 mod20_recup_gsheet.py			    	Récupère un CSV déclaratif gsheet quotidien / à la demande
+│   │   ├── 📁 load/
+│   │   │   ├── 🐍 mod60_load_rh_tables.py      			Charge en base les tables RH
+│   │   │   ├── 🐍 mod61_load_param_avantage.py		     Charge en base la table metier.param à partir de config_param_avantage.yml
+│   │   │   └── 🐍 mod62_load_activite_table.py   	     Charge en base la table metier.activite
+│   │   ├── 📁 transform/
+│   │   │   └── 🐍 mod40_normalise_gsheet.py		          Normalise les déclaratifs gsheet
+│   ├── 📁 gene_lignes/
+│   │   ├── 🐍 mod50_simuler_activites.py		        	Génère des lignes de simulation (paramétrables via config_pipeline.yml)
+│   │   └── 🐍 mod50_verif_simulation.py		    		Vérifie la conformité des simulations produites
+│   ├── 📁 maps/
+│   │   └── 🐍 mod80_recup_distances.py		            	Récupère les distances domicile/travail des salariés (API Google Maps Routes)
+│   ├── 📁 slack/
+│   │   ├── 🐍 alerting.py                                  Envoie des alertes (erreurs / anomalies) dans channel Slack Alerting
+│   │   └── 🐍 mod99_publish_slack.py			    	     Envoie des messages de félicitation dans channel Slack p12-avantages-sportifs
+│   └── 📁 utils/
+│       ├── ⚙️ activite_mapping.yml    	                    Paramètres de mapping pour table activite
+│       ├── ⚙️ config_param_avantage.yml    	               Paramètres chargeables en table pour générer les simulations KPIs Power BI
+│       ├── ⚙️ config_pipeline.yml				          Configuration générale (paramètrage pour génération de déclaratifs simulés)
+│       ├── 🐍 logger.py						          Utilitaires logging (console, Kestra, table ops.run_metrique)
+│       └── 🐍 normalisation.py	    			          Fonctions communes (lecture config, pseudo SALT, norm dates, texte)
+│       └── ⚙️ rh_mapping.yml          	                    Paramètres de mapping pour tables RH
+├── 📄 .env
+├── 📄 .env.exemple
+├── 📄 .gitignore
+├── ⚙️ docker_compose.yml
+├── 📄 dockerfile
+├── ⚙️ p12.orchestration_avantages_sportifs.yml             Flow Kestra
+├── 📄 README.md
+└── 📄 requirements.txt
