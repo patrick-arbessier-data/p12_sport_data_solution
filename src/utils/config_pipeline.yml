@@ -1,5 +1,5 @@
 # Configuration des paramètres contextuels et métier du pipeline
-#Utilisée pour la génération des déclaratifs, pour les transformations et règles métiers d'ligibilité
+# Utilisée pour la génération des déclaratifs, pour les transformations et règles métiers d'éligibilité
 
 regles_eligibilite:
   fenetre_activites:
@@ -11,45 +11,60 @@ regles_eligibilite:
     nb_mois: 12
 
     # Si false : prendre uniquement des mois complets (exécution le 17/12/2025 -> 01/12/2024..30/11/2025)
-    # Si true  : inclure le mois courant (exécution le 17/12/2025 -> 01/01/2025..17/12/2025 ou équivalent selon implémentation)
-    inclure_mois_courant: true
+    # Si true  : inclure le mois courant (exécution le 17/12/2025 -> 01/01/2025..17/12/2025 ou équivalent
+    # selon implémentation --> VOIR Scénarios de simulation)
+    inclure_mois_courant: false
 
     # Référence temporelle : date d'exécution en Europe/Paris
     reference_date: DATE_EXECUTION_PARIS
 
 activites:
-  # Sur-génération puis sous-échantillonnage
-  facteur_surgeneration: 1.30  # pour sécuriser un surplus
-
-  # Nombre total de lignes (activités) à générer sur 12 mois
-  # De mini : 3000 à maxi : 10 000 (--> correspond à un nb d'activités plausible pour 160 salariés)
-  nb_lignes: 7000
-
-  # Seed de génération pour reproductibilité
-  random_seed: 42
-
-  # Scénario de volumétrie : pessimiste | realiste | optimiste
-  # Si scénraio pessimiste :  diminuer le nombre de lignes générées (=<6000)
+ # Scénario de volumétrie : pessimiste | realiste | optimiste
   scenario: "realiste"
 
-  # Plages mensuelles (min, max) d'activités par profil, par scénario.
-  # Profils :
-  # - faible  : groupe A (pas de sport ET déplacement non actif)
-  # - moyen   : groupe B (sport OU déplacement actif) hors groupe C
-  # - eleve   : groupe C (sport ET déplacement actif)
+  # Volume total d’activités générées sur la fenêtre (12 mois).
+  # Reco POC (rapports BI) avec les bornes actuelles :
+  # - pessimiste : 3000–5500 (max conseillé ~6000)
+  # - realiste  : 6000–10000 (max conseillé ~10800)  # défaut : 7000
+  # - optimiste : 10000–14000 (max conseillé ~15300)
+  nb_lignes: 8000
+
+  # Scénarios (volumétrie mensuelle par profil) : [MIN, MAX]
+  #
+  # A) Format des bornes (obligatoire)
+  # - Pour chaque profil : [MIN, MAX] avec MIN et MAX entiers
+  # - Contrainte : 0 <= MIN <= MAX
+  #
+  # B) Unicité “1 activité / jour / salarié” (obligatoire)
+  # - L’heure est fixée à 12:00 (Europe/Paris) : l’unicité se vérifie au niveau du JOUR.
+  # - Pour éviter les collisions : MAX doit rester <= nb de jours disponibles dans le mois.
+  #   Reco robuste : MAX <= 28 (compatible février).
+  #   Si inclure_mois_courant=true : le mois courant est limité à “aujourd’hui” (jour),
+  #   donc un MAX trop élevé peut forcer des redistributions et casser les contrôles.
+  #
+  # D) Capacité globale (obligatoire)
+  # - Le générateur sur-génère puis sous-échantillonne : cible_interne = nb_lignes * facteur_surgeneration
+  # - La config doit permettre d’atteindre cette cible (sinon : génération insuffisante / config impossible).
   scenarios:
     pessimiste:
       faible: [0, 1]
-      moyen: [2, 4]
-      eleve: [5, 7]
+      moyen:  [2, 4]
+      eleve:  [5, 7]
     realiste:
       faible: [0, 3]
-      moyen: [4, 7]
-      eleve: [8, 12]
+      moyen:  [4, 7]
+      eleve:  [8, 12]
     optimiste:
       faible: [0, 5]
-      moyen: [6, 10]
-      eleve: [11, 16]
+      moyen:  [6, 10]
+      eleve:  [11, 16]
+
+  # Sur-génération puis sous-échantillonnage (doit rester > 1.0)
+  facteur_surgeneration: 1.30
+
+  # Seed pour reproductibilité
+  random_seed: 42
+
 
 referentiels:
   # Valeurs attendues dans la colonne mod_depl_decl du fichier RH

@@ -19,7 +19,6 @@ expected_cols:
 
 sources_to_replace:
   - csv_simule
-  - csv_gsheet
 
 # --- SECTION TRANSFORM (mod40) ---
 normalisation:

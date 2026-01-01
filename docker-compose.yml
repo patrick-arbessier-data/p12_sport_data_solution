@@ -180,7 +180,7 @@ services:
     profiles: ["runner"]
     build:
       context: .
-      dockerfile: Dockerfile
+      dockerfile: dockerfile
     image: p12-python-runner:latest
     container_name: p12-python-runner
     command: ["python", "--version"]

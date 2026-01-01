@@ -22,6 +22,7 @@ Thumbs.db
 # Données
 data/processed/*
 data/raw/*
+logs/*
 
 # Conservation des fichiers Excel de test
 !data/raw/*.xlsx

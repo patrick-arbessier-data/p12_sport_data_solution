@@ -563,11 +563,16 @@ def _normalize_gsheet_vectorized(
     nb_anomalies = len(all_anos)
 
     if not all_anos.empty:
-        out_ano = all_anos.rename(columns={"ano_raison": "raison"})
-        for c in cols_ano[:-1]:
-            if c not in out_ano.columns:
-                out_ano[c] = ""
-        out_ano = out_ano[["raison"] + cols_ano[:-1]]
+        # Affectation directe pour écraser toute colonne 'raison' existante
+        all_anos["raison"] = all_anos["ano_raison"]
+
+        # Garantie des colonnes manquantes
+        for c in gsheet_cols:
+            if c not in all_anos.columns:
+                all_anos[c] = ""
+
+        # Sélection stricte : Une seule colonne 'raison' + les colonnes gsheet
+        out_ano = all_anos[["raison"] + gsheet_cols]
 
         logs_dir.mkdir(parents=True, exist_ok=True)
         out_ano.to_csv(logs_dir / f"{run_tag}_gsheet_anomalie.csv", index=False, encoding="utf-8")

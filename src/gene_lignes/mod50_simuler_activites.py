@@ -52,11 +52,13 @@ Traitements & fonctionnalités
 - Attribution d'un "profil de volume" (faible/moyen/élevé) selon les déclaratifs.
 - Génération temporelle sur une fenêtre glissante (paramètre config).
 - Simulation des activités :
-  - Tirage du sport (préférence déclarée ou aléatoire pondéré).
-  - Calcul de la durée et de la distance selon des règles métiers.
-  - Application d'un facteur de variabilité aléatoire.
-- Sur-génération (top-up) puis sous-échantillonnage pour atteindre précisément
-  le nombre de lignes cible (activites.nb_lignes).
+    - Tirage du sport (préférence déclarée ou aléatoire pondéré).
+    - Placement temporel avec gestion des collisions (100 essais max par activité).
+    - Rejet de l'activité si aucun créneau journalier n'est libre (saturation).
+    - Calcul de la durée et de la distance selon des règles métiers.
+- Application d'un facteur de variabilité aléatoire.
+- Sur-génération (top-up) pour tenter d'atteindre le volume cible.
+- Sous-échantillonnage final pour s'approcher au plus près de activites.nb_lignes.
 - Pseudonymisation déterministe des matricules salariés.
 - Écriture du CSV final respectant strictement le schéma défini dans activite_mapping.yml.
 
@@ -87,6 +89,8 @@ import os
 import random
 import sys
 import unicodedata
+import calendar
+from collections import Counter
 from dataclasses import dataclass
 from datetime import datetime, timedelta
 from pathlib import Path
@@ -274,6 +278,22 @@ def _tirer_nb_activites_par_mois(rng: random.Random, scenario_cfg: dict[str, Any
 # Action 05 - Orchestration (Main)
 # -------------------------------------------------------------------
 def main() -> int:
+    """
+    Point d'entrée principal du script de simulation des activités.
+
+    Orchestration :
+    1. Initialisation de l'environnement (logs, chemins).
+    2. Chargement de la configuration (YAML) et des référentiels (Excel).
+    3. Préparation des structures de données (Employés, Profils).
+    4. Génération itérative des activités (Tirage aléatoire sous contrainte).
+    5. Sérialisation des résultats en CSV et écriture des métriques en base.
+
+    Returns:
+        int: Code de retour (0=Succès, 1=Échec).
+    """
+    # -----------------------------------
+    # Action 05-a : Initialisation
+    # -----------------------------------
     args = _parse_args(sys.argv[1:])
     global LOGGER
     LOGGER = get_logger(script="mod50_simuler_activites", origin=args.origin, level=args.log_level)
@@ -286,14 +306,17 @@ def main() -> int:
 
     tz = ZoneInfo("Europe/Paris")
     date_debut_exe = datetime.now(tz)
-    
+
     statut = "FAILED_EXCEPTION"
     lignes_simulees = 0
 
     try:
+        # -----------------------------------
+        # Action 05-b : Chargement Config
+        # -----------------------------------
         cfg = charger_yaml(config_path)
         map_cfg = _load_mapping_config(mapping_path)
-        
+
         simu_cfg = map_cfg["simulation"]
         cols_out = simu_cfg["cols_out"]
         rh_cols = simu_cfg["rh_cols_required"]
@@ -302,10 +325,12 @@ def main() -> int:
         col_sport_id, col_sport = sport_cols[0], sport_cols[1]
 
         reference_date = str(_get_required(cfg, "regles_eligibilite.fenetre_activites.reference_date"))
-        if reference_date != "DATE_EXECUTION_PARIS": raise ValueError(f"reference_date non supportée : {reference_date}")
-        
+        if reference_date != "DATE_EXECUTION_PARIS":
+            raise ValueError(f"reference_date non supportée : {reference_date}")
+
         type_fenetre = str(_get_required(cfg, "regles_eligibilite.fenetre_activites.type_fenetre"))
-        if type_fenetre != "GLISSANTE_MENSUELLE": raise ValueError(f"type_fenetre non supporté : {type_fenetre}")
+        if type_fenetre != "GLISSANTE_MENSUELLE":
+            raise ValueError(f"type_fenetre non supporté : {type_fenetre}")
 
         fenetre_mois = int(_get_required(cfg, "regles_eligibilite.fenetre_activites.nb_mois"))
         inclure_mois_courant = bool(_get_required(cfg, "regles_eligibilite.fenetre_activites.inclure_mois_courant"))
@@ -313,21 +338,26 @@ def main() -> int:
         seed = int(_get_required(cfg, "activites.random_seed"))
         scenario = str(_get_required(cfg, "activites.scenario"))
         facteur_surgeneration = float(_get_required(cfg, "activites.facteur_surgeneration"))
-        
+
         scenarios_cfg = _get_required(cfg, "activites.scenarios")
-        if scenario not in scenarios_cfg: raise ValueError(f"Scenario inconnu : {scenario}.")
+        if scenario not in scenarios_cfg:
+            raise ValueError(f"Scenario inconnu : {scenario}.")
         scenario_cfg = scenarios_cfg[scenario]
-        
+
         regles_simulation = _get_required(cfg, "regles_simulation")
         sports_endurance = list(_get_required(regles_simulation, "sports_endurance"))
         sports_non_endurance = list(_get_required(regles_simulation, "sports_non_endurance"))
 
         salt = os.getenv("P12_PSEUDO_SALT")
-        if not salt: raise RuntimeError("Variable d'environnement P12_PSEUDO_SALT manquante.")
+        if not salt:
+            raise RuntimeError("Variable d'environnement P12_PSEUDO_SALT manquante.")
 
         rng = random.Random(seed)
         now = datetime.now(tz)
 
+        # -----------------------------------
+        # Action 05-c : Chargement Données
+        # -----------------------------------
         rh_path = _trouver_fichier_excel(data_raw_dir, ["rh"])
         sport_path = _trouver_fichier_excel(data_raw_dir, ["sport"])
         LOGGER.info("Fichier RH : %s", rh_path)
@@ -338,9 +368,11 @@ def main() -> int:
         df_sport = pd.read_excel(sport_path)
 
         for col in rh_cols:
-            if col not in df_rh.columns: raise KeyError(f"Colonne manquante dans RH : '{col}'")
+            if col not in df_rh.columns:
+                raise KeyError(f"Colonne manquante dans RH : '{col}'")
         for col in sport_cols:
-            if col not in df_sport.columns: raise KeyError(f"Colonne manquante dans Sport : '{col}'")
+            if col not in df_sport.columns:
+                raise KeyError(f"Colonne manquante dans Sport : '{col}'")
 
         df_rh = df_rh[rh_cols].copy()
         df_rh[col_id] = df_rh[col_id].astype(str).str.strip()
@@ -353,6 +385,9 @@ def main() -> int:
         df_sport = df_sport.drop_duplicates(subset=[col_sport_id]).reset_index(drop=True)
         sport_map = dict(zip(df_sport[col_sport_id], df_sport[col_sport]))
 
+        # -----------------------------------
+        # Action 05-d : Préparation Salariés
+        # -----------------------------------
         employes: list[Employe] = []
         stats = {"faible": 0, "moyen": 0, "eleve": 0}
 
@@ -360,72 +395,190 @@ def main() -> int:
             id_brut = str(row[col_id]).strip()
             mode = str(row[col_mode]).strip()
             sport_decl = sport_map.get(id_brut)
-            if sport_decl is not None and str(sport_decl).strip() == "": sport_decl = None
-            
+            if sport_decl is not None and str(sport_decl).strip() == "":
+                sport_decl = None
+
             cle = pseudonymiser_cle_salarie(id_salarie_brut=id_brut, salt=salt)
             profil = _determiner_profil_volume(sport_declare=sport_decl, mod_depl_decl=mode)
-            employes.append(Employe(id_salarie_brut=id_brut, mod_depl_decl=mode, sport_declare=sport_decl, cle_salarie=cle, profil_volume=profil))
+            employes.append(
+                Employe(
+                    id_salarie_brut=id_brut,
+                    mod_depl_decl=mode,
+                    sport_declare=sport_decl,
+                    cle_salarie=cle,
+                    profil_volume=profil,
+                )
+            )
             stats[profil] += 1
 
         LOGGER.info("Population : %s salariés %s", len(employes), stats)
 
+        # -----------------------------------
+        # Action 05-e : Planification
+        # -----------------------------------
         mois_fenetre = _mois_dernieres_n_fenetres(now, fenetre_mois, inclure_mois_courant)
         cible_interne = max(nb_lignes, int(round(nb_lignes * facteur_surgeneration)))
+
+        # Jours disponibles par mois : mois courant borné à now.day (pas de dates après aujourd'hui)
+        jours_dispo_mois: dict[tuple[int, int], int] = {}
+        for (yy, mm) in mois_fenetre:
+            dmax = calendar.monthrange(yy, mm)[1]
+            if yy == now.year and mm == now.month:
+                dmax = now.day
+            jours_dispo_mois[(yy, mm)] = int(dmax)
 
         couples_emp_mois: list[tuple[Employe, int, int]] = []
         compteur_emp_mois: dict[tuple[str, int, int], int] = {}
 
+        # --- Planification initiale : capper par (MAX scénario) ET (jours dispo du mois)
         for emp in employes:
+            max_scenario_emp = int(scenario_cfg[emp.profil_volume][1])
             for (y, m) in mois_fenetre:
-                n = _tirer_nb_activites_par_mois(rng, scenario_cfg, emp.profil_volume)
+                jours_m = int(jours_dispo_mois[(y, m)])
+                cap_mois = min(max_scenario_emp, jours_m)
+
+                if cap_mois <= 0:
+                    compteur_emp_mois[(emp.cle_salarie, y, m)] = 0
+                    continue
+
+                n_brut = _tirer_nb_activites_par_mois(rng, scenario_cfg, emp.profil_volume)
+                n = min(int(n_brut), cap_mois)
+
                 compteur_emp_mois[(emp.cle_salarie, y, m)] = n
-                for _ in range(n): couples_emp_mois.append((emp, y, m))
+                for _ in range(n):
+                    couples_emp_mois.append((emp, y, m))
 
         LOGGER.info("Lignes initiales : %s", len(couples_emp_mois))
 
+        # --- Top-up : uniquement sur des mois où il reste de la capacité (cap_mois)
         if len(couples_emp_mois) < cible_interne:
             LOGGER.info("Top-up en cours...")
             prof_prio = {"eleve": 3, "moyen": 2, "faible": 1}
             employes_tries = sorted(employes, key=lambda e: prof_prio[e.profil_volume], reverse=True)
+
             tentatives = 0
             while len(couples_emp_mois) < cible_interne:
                 tentatives += 1
-                if tentatives > 200_000: break
+                if tentatives > 200_000:
+                    break
+
                 emp = employes_tries[rng.randint(0, min(len(employes_tries) - 1, 30))]
                 y, m = mois_fenetre[rng.randint(0, len(mois_fenetre) - 1)]
+
+                jours_m = int(jours_dispo_mois[(y, m)])
+                max_scenario_emp = int(scenario_cfg[emp.profil_volume][1])
+                cap_mois = min(max_scenario_emp, jours_m)
+                if cap_mois <= 0:
+                    continue
+
                 key = (emp.cle_salarie, y, m)
-                max_mois = int(scenario_cfg[emp.profil_volume][1])
-                if compteur_emp_mois.get(key, 0) >= max_mois: continue
+                if compteur_emp_mois.get(key, 0) >= cap_mois:
+                    continue
+
                 couples_emp_mois.append((emp, y, m))
                 compteur_emp_mois[key] = compteur_emp_mois.get(key, 0) + 1
 
+        # ---------------------------------------------------------------------
+        # Micro-check : refuser une configuration impossible (sans déplacer de mois)
+        # ---------------------------------------------------------------------
+        jours_disponibles_fenetre = sum(jours_dispo_mois.values())
+        capacite_globale = len(employes) * jours_disponibles_fenetre
+        if nb_lignes > capacite_globale:
+            raise RuntimeError(
+                f"Configuration impossible : nb_lignes={nb_lignes} > capacité={capacite_globale} "
+                f"({len(employes)} salariés × {jours_disponibles_fenetre} jours)."
+            )
+
+        # Cap par salarié (tous mois confondus)
+        cnt_emp_total = Counter(emp.cle_salarie for (emp, _, _) in couples_emp_mois)
+        max_emp_total = max(cnt_emp_total.values(), default=0)
+        if max_emp_total > jours_disponibles_fenetre:
+            raise RuntimeError(
+                f"Configuration impossible : un salarié a {max_emp_total} activités demandées "
+                f"sur {jours_disponibles_fenetre} jours disponibles."
+            )
+
+        # Cap par salarié et par mois (double sécurité)
+        for (cle, y, m), n in compteur_emp_mois.items():
+            jours_m = int(jours_dispo_mois[(y, m)])
+            if n > jours_m:
+                raise RuntimeError(
+                    f"Configuration impossible : {cle} a {n} activités sur {y:04d}-{m:02d} "
+                    f"mais seulement {jours_m} jours disponibles (mois courant borné à aujourd'hui)."
+                )
+
+        # ---------------------------------------------------------------------
+        # Pools de jours (sans remplacement) par salarié et par mois
+        # ---------------------------------------------------------------------
+        jours_par_mois: dict[tuple[int, int], list[str]] = {}
+        for (yy, mm) in mois_fenetre:
+            dmax = int(jours_dispo_mois[(yy, mm)])
+            jours_par_mois[(yy, mm)] = [f"{yy:04d}-{mm:02d}-{d:02d}" for d in range(1, dmax + 1)]
+
+        jours_pool_emp: dict[str, dict[tuple[int, int], list[str]]] = {}
+        for e in employes:
+            per_month: dict[tuple[int, int], list[str]] = {}
+            for k_month, days in jours_par_mois.items():
+                tmp = days[:]
+                rng.shuffle(tmp)
+                per_month[k_month] = tmp
+            jours_pool_emp[e.cle_salarie] = per_month
+
+        # -----------------------------------
+        # Action 05-f : Génération Activités
+        # -----------------------------------
         rows: list[dict[str, Any]] = []
         jours_utilises: set[tuple[str, str]] = set()
 
         for emp, y, m in couples_emp_mois:
             sport = _tirer_sport_principal(rng, emp.sport_declare, sports_endurance, sports_non_endurance)
-            dt = _random_date_dans_mois(rng, tz, y, m, now)
-            for _ in range(100):
-                jour_local = dt.astimezone(tz).strftime("%Y-%m-%d")
-                k = (emp.cle_salarie, jour_local)
-                if k not in jours_utilises:
-                    jours_utilises.add(k)
-                    break
-                dt = _random_date_dans_mois(rng, tz, y, m, now)
-            duree_sec, distance_m = _generer_duree_distance(rng, sport in set(sports_endurance), emp.mod_depl_decl, regles_simulation)
-            rows.append({
-                "cle_salarie": emp.cle_salarie,
-                "date_debut": dt.isoformat(),
-                "duree_sec": int(duree_sec),
-                "distance_m": distance_m,
-                "type_activite": sport,
-                "commentaire": "",
-                "source_donnee": "csv_simule",
-            })
+
+            pool_pref = jours_pool_emp[emp.cle_salarie][(y, m)]
+            if not pool_pref:
+                # Ne devrait pas arriver si caps OK : on refuse plutôt que de déplacer vers un autre mois.
+                raise RuntimeError(
+                    f"Pool jours épuisé pour {emp.cle_salarie} sur {y:04d}-{m:02d} "
+                    f"(config/caps incohérents)."
+                )
+
+            jour_str = pool_pref.pop()
+
+            # Unicité (sécurité) + construction à 12:00:00 Europe/Paris
+            k = (emp.cle_salarie, jour_str)
+            if k in jours_utilises:
+                # Ne devrait jamais arriver (pool sans remplacement), mais on sécurise.
+                continue
+            jours_utilises.add(k)
+
+            yy, mm, dd = map(int, jour_str.split("-"))
+            final_dt = datetime(yy, mm, dd, 12, 0, 0, tzinfo=tz)
+
+            duree_sec, distance_m = _generer_duree_distance(
+                rng,
+                sport in set(sports_endurance),
+                emp.mod_depl_decl,
+                regles_simulation,
+            )
+
+            rows.append(
+                {
+                    "cle_salarie": emp.cle_salarie,
+                    "date_debut": final_dt.isoformat(),
+                    "duree_sec": int(duree_sec),
+                    "distance_m": distance_m,
+                    "type_activite": sport,
+                    "commentaire": "",
+                    "source_donnee": "csv_simule",
+                }
+            )
 
         LOGGER.info("Lignes générées (total) : %s", len(rows))
-        if len(rows) < nb_lignes: raise RuntimeError(f"Génération insuffisante : {len(rows)} < {nb_lignes}")
+        if len(rows) < nb_lignes:
+            raise RuntimeError(f"Génération insuffisante : {len(rows)} < {nb_lignes}")
 
+        # -----------------------------------
+        # Action 05-g : Export CSV
+        # -----------------------------------
         indices = list(range(len(rows)))
         rng.shuffle(indices)
         indices = indices[:nb_lignes]
@@ -436,7 +589,8 @@ def main() -> int:
         with out_path.open("w", encoding="utf-8", newline="") as f:
             writer = csv.DictWriter(f, fieldnames=cols_out, extrasaction="ignore")
             writer.writeheader()
-            for r in rows_final: writer.writerow(r)
+            for r in rows_final:
+                writer.writerow(r)
 
         statut = "SUCCESS"
         log_success(LOGGER, message="CSV simulé écrit.", context={"rows": lignes_simulees})
@@ -448,6 +602,9 @@ def main() -> int:
         return 1
 
     finally:
+        # -----------------------------------
+        # Action 05-h : Métriques DB
+        # -----------------------------------
         try:
             date_fin_exe = datetime.now(tz)
             with psycopg.connect(
@@ -472,6 +629,7 @@ def main() -> int:
                 conn.commit()
         except Exception:
             pass
+
 
 if __name__ == "__main__":
     sys.exit(main())
