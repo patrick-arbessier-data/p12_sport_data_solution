@@ -165,7 +165,7 @@ Pour prendre en compte le changement (0|1), exécuter **obligatoirement** :
 
 Le flow Kestra pilote l’exécution via des **flags** (décision de routage) et des **garde-fous techniques**.
 
-Voir les [détails des tâches du flow Kestra](docs/orchestration/details_yaml.md) (Mermaid).
+Voir les [détails des tâches du flow Kestra](docs/orchestration/détails_yaml.md).
 
 ### Flags de décision (scénarios S/G/P)
 
@@ -210,7 +210,7 @@ Deux familles :
 
 ### Exécuter Soda en Docker
 
-exemple :
+exemple (bash / Linux) :
 
 ```bash
 docker run --rm \
@@ -263,6 +263,7 @@ docker run --rm \
 ├─ p12.orchestration.pipeline_avantages_sportifs.yaml        (flow Kestra)
 ├─ docs/
 │  └─ orchestration/
+│     ├─ détails_yaml.md
 │     ├─ table_decision.md
 │     ├─ schema_logique.md
 │     └─ plan_de_test.md
