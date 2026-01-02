@@ -12,8 +12,13 @@ regles_eligibilite:
 
     # Si false : prendre uniquement des mois complets (exécution le 17/12/2025 -> 01/12/2024..30/11/2025)
     # Si true  : inclure le mois courant (exécution le 17/12/2025 -> 01/01/2025..17/12/2025 ou équivalent
-    # selon implémentation --> VOIR Scénarios de simulation)
-    inclure_mois_courant: false
+    # -----------------------------------------------------------------------------------------------------
+    # Attention ! l'implémentation de l'option inclure_mois_courant: FALSE n'est pas finalisée. 
+    # L'activation de cette option nécessite la création d'une variable d'environnement récupérée 
+    # par Kestra puis implémentée dans la tâche SODA Table (le module MOD70).
+    # Activer inclure_mois_courant: FALSE provoquera une erreur lors des contrôles SODA Tables (activités)
+    # -----------------------------------------------------------------------------------------------------
+    inclure_mois_courant: true
 
     # Référence temporelle : date d'exécution en Europe/Paris
     reference_date: DATE_EXECUTION_PARIS

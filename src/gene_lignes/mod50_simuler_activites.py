@@ -274,9 +274,6 @@ def _tirer_nb_activites_par_mois(rng: random.Random, scenario_cfg: dict[str, Any
     borne = scenario_cfg[profil]
     return rng.randint(int(borne[0]), int(borne[1]))
 
-# -------------------------------------------------------------------
-# Action 05 - Orchestration (Main)
-# -------------------------------------------------------------------
 def main() -> int:
     """
     Point d'entrée principal du script de simulation des activités.
@@ -353,7 +350,8 @@ def main() -> int:
             raise RuntimeError("Variable d'environnement P12_PSEUDO_SALT manquante.")
 
         rng = random.Random(seed)
-        now = datetime.now(tz)
+        # Référence temporelle unique du run (évite les incohérences si le script franchit minuit)
+        now = date_debut_exe
 
         # -----------------------------------
         # Action 05-c : Chargement Données
@@ -426,6 +424,28 @@ def main() -> int:
             if yy == now.year and mm == now.month:
                 dmax = now.day
             jours_dispo_mois[(yy, mm)] = int(dmax)
+
+        # --- Fail-fast : incohérence entre mois_fenetre et jours_dispo_mois (évite KeyError)
+        missing = [k for k in mois_fenetre if k not in jours_dispo_mois]
+        if missing:
+            raise RuntimeError(
+                "Incohérence planification : certains mois de mois_fenetre ne sont pas présents dans jours_dispo_mois. "
+                f"missing={missing} | mois_fenetre={mois_fenetre} | keys={sorted(jours_dispo_mois.keys())}"
+            )
+
+        # Log explicite des bornes de fenêtre (debug + traçabilité)
+        y0, m0 = mois_fenetre[0]
+        y1, m1 = mois_fenetre[-1]
+        end_day = int(jours_dispo_mois[(y1, m1)])
+        start_fenetre = datetime(y0, m0, 1, tzinfo=tz).date()
+        end_fenetre = datetime(y1, m1, end_day, tzinfo=tz).date()
+        LOGGER.info(
+            "Fenêtre simulation (Europe/Paris) : %s -> %s | nb_mois=%s | inclure_mois_courant=%s",
+            start_fenetre,
+            end_fenetre,
+            fenetre_mois,
+            inclure_mois_courant,
+        )
 
         couples_emp_mois: list[tuple[Employe, int, int]] = []
         compteur_emp_mois: dict[tuple[str, int, int], int] = {}
@@ -551,7 +571,13 @@ def main() -> int:
             jours_utilises.add(k)
 
             yy, mm, dd = map(int, jour_str.split("-"))
-            final_dt = datetime(yy, mm, dd, 12, 0, 0, tzinfo=tz)
+
+            # Construction à 12:00:00 Europe/Paris (unicité au jour).
+            # Si exécution avant midi et jour == aujourd'hui, éviter un timestamp "dans le futur".
+            hour = 12
+            if inclure_mois_courant and (yy == now.year and mm == now.month and dd == now.day) and now.hour < 12:
+                hour = 0
+            final_dt = datetime(yy, mm, dd, hour, 0, 0, tzinfo=tz)
 
             duree_sec, distance_m = _generer_duree_distance(
                 rng,
@@ -629,7 +655,6 @@ def main() -> int:
                 conn.commit()
         except Exception:
             pass
-
 
 if __name__ == "__main__":
     sys.exit(main())
