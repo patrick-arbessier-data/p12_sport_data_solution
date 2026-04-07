@@ -33,5 +33,6 @@ logs/*
 !*/.gitkeep
 
 # Autres répertoires
+0_infos_projet/*
 temp/*
 livrables/*
